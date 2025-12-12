@@ -1,0 +1,212 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - OLTP Database + DWH
+  postgres:
+    image: postgres:15-alpine
+    container_name: metropulse-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: metropulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./stage1_dwh_design/oltp_schema.sql:/docker-entrypoint-initdb.d/01_oltp.sql
+      - ./stage1_dwh_design/ddl/staging:/docker-entrypoint-initdb.d/staging
+      - ./stage1_dwh_design/ddl/core:/docker-entrypoint-initdb.d/core
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - metropulse-network
+
+  # MinIO - S3-compatible Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: metropulse-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - metropulse-network
+
+  # Kafka - Message Broker для vehicle_positions
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: metropulse-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - metropulse-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: metropulse-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    networks:
+      - metropulse-network
+
+  # Apache Spark - Batch Processing
+  spark-master:
+    image: bitnami/spark:3.4
+    container_name: metropulse-spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8080:8080"  # Spark Master Web UI
+      - "7077:7077"  # Spark Master Port
+    volumes:
+      - ./stage2_batch_pipeline/spark_jobs:/opt/spark-jobs
+      - spark_data:/opt/spark-data
+    networks:
+      - metropulse-network
+
+  spark-worker:
+    image: bitnami/spark:3.4
+    container_name: metropulse-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8081:8081"  # Spark Worker Web UI
+    volumes:
+      - ./stage2_batch_pipeline/spark_jobs:/opt/spark-jobs
+      - spark_data:/opt/spark-data
+    networks:
+      - metropulse-network
+
+  # ClickHouse - OLAP для Batch Analytics (Вариант А)
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    container_name: metropulse-clickhouse
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"  # HTTP
+      - "9000:9000"  # Native
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./stage3_marts/option_a_batch/clickhouse_init:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - metropulse-network
+
+  # Redis - In-Memory DB для Real-time (Вариант Б)
+  redis:
+    image: redis:7.2-alpine
+    container_name: metropulse-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - metropulse-network
+
+  # Apache Flink - Stream Processing (Вариант Б)
+  flink-jobmanager:
+    image: flink:1.17-scala_2.12-java11
+    container_name: metropulse-flink-jobmanager
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    ports:
+      - "8082:8081"  # Flink Web UI (порт 8081 занят Spark Worker)
+    command: jobmanager
+    volumes:
+      - ./stage3_marts/option_b_stream/flink_jobs:/opt/flink/jobs
+      - flink_data:/opt/flink/data
+    networks:
+      - metropulse-network
+
+  flink-taskmanager:
+    image: flink:1.17-scala_2.12-java11
+    container_name: metropulse-flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    command: taskmanager
+    volumes:
+      - ./stage3_marts/option_b_stream/flink_jobs:/opt/flink/jobs
+      - flink_data:/opt/flink/data
+    networks:
+      - metropulse-network
+
+  # Jupyter Notebook - для Data Science и анализа
+  jupyter:
+    image: jupyter/pyspark-notebook:latest
+    container_name: metropulse-jupyter
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - spark_data:/home/jovyan/data
+    networks:
+      - metropulse-network
+
+volumes:
+  postgres_data:
+  minio_data:
+  clickhouse_data:
+  redis_data:
+  spark_data:
+  flink_data:
+
+networks:
+  metropulse-network:
+    driver: bridge
+
