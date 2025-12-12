@@ -1,8 +1,3 @@
-"""
-MetroPulse - Spark ETL Pipeline
-Загрузка данных из MinIO в DWH с поддержкой SCD Type 2
-"""
-
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, lit, current_timestamp, to_date, to_timestamp,
@@ -251,7 +246,6 @@ class MetroPulseETL:
                         lit(True).alias("is_current")
                     )
 
-                # TODO: Реализовать полный UPDATE/INSERT для SCD Type 2
                 logger.warning("SCD Type 2 UPDATE требует дополнительной логики")
 
             if df_inserts.count() > 0:
