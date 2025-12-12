@@ -261,14 +261,72 @@ class DataLoader:
         cursor.close()
         logger.info("✓ Копирование в Staging завершено")
 
+    def truncate_oltp_tables(self):
+        """Очистка всех OLTP и Staging таблиц перед загрузкой"""
+        logger.info("Очистка OLTP и Staging таблиц...")
+
+        cursor = self.conn.cursor()
+
+        # Отключаем проверку FK на время очистки
+        cursor.execute("SET session_replication_role = 'replica';")
+
+        # Сначала очищаем staging таблицы (не имеют FK к OLTP)
+        staging_tables = [
+            'staging.stg_transactions',
+            'staging.stg_trips',
+            'staging.stg_vehicles',
+            'staging.stg_routes',
+            'staging.stg_stations',
+            'staging.stg_users'
+        ]
+
+        for table in staging_tables:
+            try:
+                cursor.execute(f"TRUNCATE TABLE {table} CASCADE;")
+                logger.info(f"  ✓ Очищена таблица {table}")
+            except Exception as e:
+                logger.warning(f"  ⚠ Не удалось очистить {table}: {e}")
+
+        # Затем очищаем OLTP таблицы в правильном порядке
+        oltp_tables = [
+            'oltp.transactions',
+            'oltp.trips',
+            'oltp.subscriptions',
+            'oltp.route_searches',
+            'oltp.route_stations',
+            'oltp.vehicles',
+            'oltp.routes',
+            'oltp.stations',
+            'oltp.users'
+        ]
+
+        for table in oltp_tables:
+            try:
+                cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE;")
+                logger.info(f"  ✓ Очищена таблица {table}")
+            except Exception as e:
+                logger.warning(f"  ⚠ Не удалось очистить {table}: {e}")
+
+        # Включаем проверку FK обратно
+        cursor.execute("SET session_replication_role = 'origin';")
+        self.conn.commit()
+        cursor.close()
+        logger.info("✓ Очистка OLTP и Staging завершена")
+
     def load_all_data(self):
         """Загрузка всех данных"""
-        logger.info("MetroPulse Data Loading Script           ")
+        logger.info("╔════════════════════════════════════════════╗")
+        logger.info("║  MetroPulse Data Loading Script           ║")
+        logger.info("╚════════════════════════════════════════════╝")
 
         if not self.connect():
             return False
 
         try:
+            # Очистка существующих данных
+            logger.info("\n=== Очистка существующих данных ===")
+            self.truncate_oltp_tables()
+
             # Генерация данных
             logger.info("\n=== Генерация тестовых данных ===")
             generator = DataGenerator()
@@ -330,4 +388,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

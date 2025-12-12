@@ -5,36 +5,27 @@
 -- FACT TABLES (Таблицы фактов)
 
 -- Факт: Позиции транспорта (из Kafka stream)
-CREATE TABLE dwh.fact_vehicle_positions (
-    position_key BIGSERIAL PRIMARY KEY,  -- Surrogate Key
-
-    -- Foreign Keys (измерения)
-    vehicle_key BIGINT NOT NULL,
-    route_key BIGINT NOT NULL,
+CREATE TABLE IF NOT EXISTS dwh.fact_vehicle_positions (
+    position_id BIGSERIAL,
+    vehicle_key INTEGER NOT NULL,
+    route_key INTEGER NOT NULL,
     date_key INTEGER NOT NULL,
     time_key INTEGER NOT NULL,
-    occupancy_key INTEGER,
-
-    -- Measures (метрики)
     latitude DECIMAL(10, 8) NOT NULL,
     longitude DECIMAL(11, 8) NOT NULL,
-    speed DECIMAL(5, 2),  -- км/ч
-    bearing INTEGER,  -- градусы 0-360
-
-    -- Degenerate Dimensions (вырожденные измерения)
-    event_timestamp TIMESTAMP NOT NULL,
-
-    -- Metadata
-    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_system VARCHAR(50) DEFAULT 'KAFKA',
-
-    -- Foreign Key Constraints
+    speed_kmh DECIMAL(5, 2),
+    direction_degree SMALLINT,
+    is_delayed BOOLEAN DEFAULT FALSE,
+    delay_minutes INTEGER DEFAULT 0,
+    recorded_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (position_id, date_key),  -- Добавлен date_key в PRIMARY KEY
     FOREIGN KEY (vehicle_key) REFERENCES dwh.dim_vehicle(vehicle_key),
     FOREIGN KEY (route_key) REFERENCES dwh.dim_route(route_key),
     FOREIGN KEY (date_key) REFERENCES dwh.dim_date(date_key),
-    FOREIGN KEY (time_key) REFERENCES dwh.dim_time(time_key),
-    FOREIGN KEY (occupancy_key) REFERENCES dwh.dim_occupancy_level(occupancy_key)
+    FOREIGN KEY (time_key) REFERENCES dwh.dim_time(time_key)
 ) PARTITION BY RANGE (date_key);
+
 
 -- Создание партиций по дням (пример для декабря 2025)
 CREATE TABLE dwh.fact_vehicle_positions_202512 PARTITION OF dwh.fact_vehicle_positions
@@ -44,15 +35,15 @@ CREATE TABLE dwh.fact_vehicle_positions_202512 PARTITION OF dwh.fact_vehicle_pos
 CREATE INDEX idx_fact_positions_vehicle ON dwh.fact_vehicle_positions(vehicle_key, date_key, time_key);
 CREATE INDEX idx_fact_positions_route ON dwh.fact_vehicle_positions(route_key, date_key, time_key);
 CREATE INDEX idx_fact_positions_date_time ON dwh.fact_vehicle_positions(date_key, time_key);
-CREATE INDEX idx_fact_positions_timestamp ON dwh.fact_vehicle_positions(event_timestamp);
+CREATE INDEX idx_fact_positions_timestamp ON dwh.fact_vehicle_positions(recorded_at);
 
 COMMENT ON TABLE dwh.fact_vehicle_positions IS 'Факты позиций транспорта в реальном времени';
-COMMENT ON COLUMN dwh.fact_vehicle_positions.speed IS 'Скорость в км/ч';
-COMMENT ON COLUMN dwh.fact_vehicle_positions.bearing IS 'Направление движения в градусах (0-360)';
+COMMENT ON COLUMN dwh.fact_vehicle_positions.speed_kmh IS 'Скорость в км/ч';
+COMMENT ON COLUMN dwh.fact_vehicle_positions.direction_degree IS 'Направление движения в градусах (0-360)';
 
 -- Факт: Поездки пользователей
 CREATE TABLE dwh.fact_trips (
-    trip_key BIGSERIAL PRIMARY KEY,  -- Surrogate Key
+    trip_key BIGSERIAL,
 
     -- Foreign Keys (измерения)
     user_key BIGINT NOT NULL,
@@ -79,6 +70,9 @@ CREATE TABLE dwh.fact_trips (
     -- Metadata
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_system VARCHAR(50) DEFAULT 'OLTP',
+
+    -- Primary Key с партиционированием
+    PRIMARY KEY (trip_key, start_date_key),
 
     -- Foreign Key Constraints
     FOREIGN KEY (user_key) REFERENCES dwh.dim_user(user_key),
@@ -114,7 +108,7 @@ COMMENT ON COLUMN dwh.fact_trips.actual_fare IS 'Фактическая стои
 
 -- Факт: Транзакции (платежи)
 CREATE TABLE dwh.fact_transactions (
-    transaction_key BIGSERIAL PRIMARY KEY,  -- Surrogate Key
+    transaction_key BIGSERIAL,
 
     -- Foreign Keys (измерения)
     user_key BIGINT NOT NULL,
@@ -137,9 +131,11 @@ CREATE TABLE dwh.fact_transactions (
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_system VARCHAR(50) DEFAULT 'OLTP',
 
+    -- Primary Key с партиционированием
+    PRIMARY KEY (transaction_key, date_key),
+
     -- Foreign Key Constraints
     FOREIGN KEY (user_key) REFERENCES dwh.dim_user(user_key),
-    FOREIGN KEY (trip_key) REFERENCES dwh.fact_trips(trip_key),
     FOREIGN KEY (payment_method_key) REFERENCES dwh.dim_payment_method(payment_method_key),
     FOREIGN KEY (date_key) REFERENCES dwh.dim_date(date_key),
     FOREIGN KEY (time_key) REFERENCES dwh.dim_time(time_key)
@@ -332,13 +328,13 @@ CREATE OR REPLACE VIEW dwh.v_fact_positions_latest AS
 WITH latest_positions AS (
     SELECT
         vehicle_key,
-        MAX(event_timestamp) as latest_timestamp
+        MAX(recorded_at) as latest_timestamp
     FROM dwh.fact_vehicle_positions
-    WHERE event_timestamp > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+    WHERE recorded_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'
     GROUP BY vehicle_key
 )
 SELECT
-    fp.position_key,
+    fp.position_id,
 
     -- Vehicle info
     dv.vehicle_id,
@@ -352,24 +348,20 @@ SELECT
     -- Position data
     fp.latitude,
     fp.longitude,
-    fp.speed,
-    fp.bearing,
-
-    -- Occupancy
-    dol.occupancy_name,
-    dol.occupancy_level,
-    dol.color_code,
+    fp.speed_kmh,
+    fp.direction_degree,
+    fp.is_delayed,
+    fp.delay_minutes,
 
     -- Timestamp
-    fp.event_timestamp,
-    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - fp.event_timestamp))/60 as minutes_ago
+    fp.recorded_at,
+    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - fp.recorded_at))/60 as minutes_ago
 
 FROM dwh.fact_vehicle_positions fp
 JOIN latest_positions lp ON fp.vehicle_key = lp.vehicle_key
-    AND fp.event_timestamp = lp.latest_timestamp
+    AND fp.recorded_at = lp.latest_timestamp
 JOIN dwh.dim_vehicle dv ON fp.vehicle_key = dv.vehicle_key
-JOIN dwh.dim_route dr ON fp.route_key = dr.route_key
-LEFT JOIN dwh.dim_occupancy_level dol ON fp.occupancy_key = dol.occupancy_key;
+JOIN dwh.dim_route dr ON fp.route_key = dr.route_key;
 
 COMMENT ON VIEW dwh.v_fact_positions_latest IS 'Последние известные позиции транспорта';
 

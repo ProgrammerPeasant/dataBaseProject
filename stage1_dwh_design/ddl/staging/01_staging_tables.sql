@@ -1,6 +1,4 @@
--- MetroPulse DWH - STAGING LAYER
--- PostgreSQL
--- Описание: Staging таблицы для временного хранения сырых данных из источников
+DROP SCHEMA IF EXISTS staging CASCADE;
 
 -- Создание схемы staging
 CREATE SCHEMA IF NOT EXISTS staging;

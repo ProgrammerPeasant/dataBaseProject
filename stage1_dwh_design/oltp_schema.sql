@@ -1,12 +1,9 @@
--- MetroPulse OLTP Database Schema
--- PostgreSQL
--- Описание: Транзакционная база данных для мобильного приложения
-
+DROP SCHEMA IF EXISTS oltp CASCADE;
 -- Создание схемы
 CREATE SCHEMA IF NOT EXISTS oltp;
 
 -- Таблица: Станции и остановки
-CREATE TABLE oltp.stations (
+CREATE TABLE IF NOT EXISTS oltp.stations (
     station_id VARCHAR(20) PRIMARY KEY,
     station_name VARCHAR(200) NOT NULL,
     latitude DECIMAL(10, 8) NOT NULL,
@@ -19,14 +16,14 @@ CREATE TABLE oltp.stations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_stations_type ON oltp.stations(station_type);
-CREATE INDEX idx_stations_location ON oltp.stations(latitude, longitude);
-CREATE INDEX idx_stations_active ON oltp.stations(is_active);
+CREATE INDEX IF NOT EXISTS  idx_stations_type ON oltp.stations(station_type);
+CREATE INDEX IF NOT EXISTS  idx_stations_location ON oltp.stations(latitude, longitude);
+CREATE INDEX IF NOT EXISTS  idx_stations_active ON oltp.stations(is_active);
 
 COMMENT ON TABLE oltp.stations IS 'Справочник станций и остановок общественного транспорта';
 
 -- Таблица: Маршруты
-CREATE TABLE oltp.routes (
+CREATE TABLE IF NOT EXISTS oltp.routes (
     route_id VARCHAR(20) PRIMARY KEY,
     route_number VARCHAR(10) NOT NULL,
     route_name VARCHAR(200) NOT NULL,
@@ -38,14 +35,14 @@ CREATE TABLE oltp.routes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_routes_number ON oltp.routes(route_number);
-CREATE INDEX idx_routes_type ON oltp.routes(transport_type);
-CREATE INDEX idx_routes_active ON oltp.routes(is_active);
+CREATE INDEX IF NOT EXISTS idx_routes_number ON oltp.routes(route_number);
+CREATE INDEX IF NOT EXISTS idx_routes_type ON oltp.routes(transport_type);
+CREATE INDEX IF NOT EXISTS idx_routes_active ON oltp.routes(is_active);
 
 COMMENT ON TABLE oltp.routes IS 'Справочник маршрутов общественного транспорта';
 
 -- Таблица: Связь маршрутов и станций
-CREATE TABLE oltp.route_stations (
+CREATE TABLE IF NOT EXISTS oltp.route_stations (
     route_id VARCHAR(20) NOT NULL,
     station_id VARCHAR(20) NOT NULL,
     sequence_number INTEGER NOT NULL,
@@ -56,13 +53,13 @@ CREATE TABLE oltp.route_stations (
     FOREIGN KEY (station_id) REFERENCES oltp.stations(station_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_route_stations_route ON oltp.route_stations(route_id, sequence_number);
-CREATE INDEX idx_route_stations_station ON oltp.route_stations(station_id);
+CREATE INDEX IF NOT EXISTS idx_route_stations_route ON oltp.route_stations(route_id, sequence_number);
+CREATE INDEX IF NOT EXISTS idx_route_stations_station ON oltp.route_stations(station_id);
 
 COMMENT ON TABLE oltp.route_stations IS 'Связь маршрутов и остановок с порядком следования';
 
 -- Таблица: Транспортные средства
-CREATE TABLE oltp.vehicles (
+CREATE TABLE IF NOT EXISTS oltp.vehicles (
     vehicle_id VARCHAR(20) PRIMARY KEY,
     vehicle_type VARCHAR(20) NOT NULL CHECK (vehicle_type IN ('bus', 'tram', 'metro')),
     route_id VARCHAR(20),
@@ -76,9 +73,9 @@ CREATE TABLE oltp.vehicles (
     FOREIGN KEY (route_id) REFERENCES oltp.routes(route_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_vehicles_type ON oltp.vehicles(vehicle_type);
-CREATE INDEX idx_vehicles_route ON oltp.vehicles(route_id);
-CREATE INDEX idx_vehicles_status ON oltp.vehicles(status);
+CREATE INDEX IF NOT EXISTS idx_vehicles_type ON oltp.vehicles(vehicle_type);
+CREATE INDEX IF NOT EXISTS idx_vehicles_route ON oltp.vehicles(route_id);
+CREATE INDEX IF NOT EXISTS idx_vehicles_status ON oltp.vehicles(status);
 
 COMMENT ON TABLE oltp.vehicles IS 'Справочник транспортных средств';
 
@@ -87,7 +84,7 @@ COMMENT ON TABLE oltp.vehicles IS 'Справочник транспортных
 -- ============================================================================
 
 -- Таблица: Пользователи
-CREATE TABLE oltp.users (
+CREATE TABLE IF NOT EXISTS oltp.users (
     user_id BIGSERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
@@ -103,9 +100,9 @@ CREATE TABLE oltp.users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_users_email ON oltp.users(email);
-CREATE INDEX idx_users_status ON oltp.users(status);
-CREATE INDEX idx_users_registration ON oltp.users(registration_date);
+CREATE INDEX IF NOT EXISTS idx_users_email ON oltp.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_status ON oltp.users(status);
+CREATE INDEX IF NOT EXISTS idx_users_registration ON oltp.users(registration_date);
 
 COMMENT ON TABLE oltp.users IS 'Профили пользователей мобильного приложения';
 
@@ -114,7 +111,7 @@ COMMENT ON TABLE oltp.users IS 'Профили пользователей моб
 -- ============================================================================
 
 -- Таблица: Поездки
-CREATE TABLE oltp.trips (
+CREATE TABLE IF NOT EXISTS oltp.trips (
     trip_id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     route_id VARCHAR(20) NOT NULL,
@@ -133,11 +130,11 @@ CREATE TABLE oltp.trips (
     FOREIGN KEY (end_station_id) REFERENCES oltp.stations(station_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_trips_user ON oltp.trips(user_id, start_time DESC);
-CREATE INDEX idx_trips_route ON oltp.trips(route_id, start_time DESC);
-CREATE INDEX idx_trips_vehicle ON oltp.trips(vehicle_id, start_time DESC);
-CREATE INDEX idx_trips_start_time ON oltp.trips(start_time);
-CREATE INDEX idx_trips_status ON oltp.trips(status);
+CREATE INDEX IF NOT EXISTS idx_trips_user ON oltp.trips(user_id, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_trips_route ON oltp.trips(route_id, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_trips_vehicle ON oltp.trips(vehicle_id, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_trips_start_time ON oltp.trips(start_time);
+CREATE INDEX IF NOT EXISTS idx_trips_status ON oltp.trips(status);
 
 -- Партиционирование по месяцам (для больших объемов)
 -- CREATE TABLE oltp.trips_2025_01 PARTITION OF oltp.trips
@@ -146,7 +143,7 @@ CREATE INDEX idx_trips_status ON oltp.trips(status);
 COMMENT ON TABLE oltp.trips IS 'История поездок пользователей';
 
 -- Таблица: Транзакции
-CREATE TABLE oltp.transactions (
+CREATE TABLE IF NOT EXISTS oltp.transactions (
     transaction_id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     trip_id BIGINT,
@@ -161,9 +158,9 @@ CREATE TABLE oltp.transactions (
     FOREIGN KEY (trip_id) REFERENCES oltp.trips(trip_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_transactions_user ON oltp.transactions(user_id, transaction_date DESC);
-CREATE INDEX idx_transactions_trip ON oltp.transactions(trip_id);
-CREATE INDEX idx_transactions_date ON oltp.transactions(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_transactions_user ON oltp.transactions(user_id, transaction_date DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_trip ON oltp.transactions(trip_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON oltp.transactions(transaction_date);
 CREATE INDEX idx_transactions_status ON oltp.transactions(status);
 CREATE INDEX idx_transactions_method ON oltp.transactions(payment_method);
 

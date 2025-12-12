@@ -41,12 +41,17 @@ class DWHInitializer:
         """Выполнение SQL скрипта из файла"""
         logger.info(f"Выполнение SQL файла: {filepath}")
 
-        if not os.path.exists(filepath):
-            logger.error(f"Файл не найден: {filepath}")
+        # Определяем базовую директорию проекта (на уровень выше от scripts)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_dir = os.path.dirname(script_dir)
+        full_path = os.path.join(project_dir, filepath)
+
+        if not os.path.exists(full_path):
+            logger.error(f"Файл не найден: {full_path}")
             return False
 
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(full_path, 'r', encoding='utf-8') as f:
                 sql = f.read()
 
             cursor = self.conn.cursor()

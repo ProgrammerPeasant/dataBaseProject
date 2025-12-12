@@ -10,12 +10,12 @@ CREATE OR REPLACE FUNCTION dwh.populate_dim_date(
     end_date DATE
 ) RETURNS INTEGER AS $$
 DECLARE
-    current_date DATE;
+    v_current_date DATE;
     rows_inserted INTEGER := 0;
 BEGIN
-    current_date := start_date;
+    v_current_date := start_date;
 
-    WHILE current_date <= end_date LOOP
+    WHILE v_current_date <= end_date LOOP
         INSERT INTO dwh.dim_date (
             date_key,
             date,
@@ -43,34 +43,34 @@ BEGIN
             year_end_date
         )
         SELECT
-            TO_CHAR(current_date, 'YYYYMMDD')::INTEGER,
-            current_date,
-            EXTRACT(YEAR FROM current_date)::INTEGER,
-            EXTRACT(QUARTER FROM current_date)::INTEGER,
-            EXTRACT(MONTH FROM current_date)::INTEGER,
-            TO_CHAR(current_date, 'Month'),
-            EXTRACT(WEEK FROM current_date)::INTEGER,
-            EXTRACT(DAY FROM current_date)::INTEGER,
-            EXTRACT(DOW FROM current_date)::INTEGER + 1,  -- 1-7 (Пн-Вс)
-            TO_CHAR(current_date, 'Day'),
-            EXTRACT(DOY FROM current_date)::INTEGER,
-            CASE WHEN EXTRACT(DOW FROM current_date) IN (0, 6) THEN TRUE ELSE FALSE END,
+            TO_CHAR(v_current_date, 'YYYYMMDD')::INTEGER,
+            v_current_date,
+            EXTRACT(YEAR FROM v_current_date)::INTEGER,
+            EXTRACT(QUARTER FROM v_current_date)::INTEGER,
+            EXTRACT(MONTH FROM v_current_date)::INTEGER,
+            TO_CHAR(v_current_date, 'Month'),
+            EXTRACT(WEEK FROM v_current_date)::INTEGER,
+            EXTRACT(DAY FROM v_current_date)::INTEGER,
+            EXTRACT(DOW FROM v_current_date)::INTEGER + 1,  -- 1-7 (Пн-Вс)
+            TO_CHAR(v_current_date, 'Day'),
+            EXTRACT(DOY FROM v_current_date)::INTEGER,
+            CASE WHEN EXTRACT(DOW FROM v_current_date) IN (0, 6) THEN TRUE ELSE FALSE END,
             FALSE,  -- is_holiday - заполним отдельно
-            EXTRACT(YEAR FROM current_date)::INTEGER,  -- fiscal_year = calendar year
-            EXTRACT(QUARTER FROM current_date)::INTEGER,
-            EXTRACT(MONTH FROM current_date)::INTEGER,
-            DATE_TRUNC('week', current_date)::DATE,
-            (DATE_TRUNC('week', current_date) + INTERVAL '6 days')::DATE,
-            DATE_TRUNC('month', current_date)::DATE,
-            (DATE_TRUNC('month', current_date) + INTERVAL '1 month' - INTERVAL '1 day')::DATE,
-            DATE_TRUNC('quarter', current_date)::DATE,
-            (DATE_TRUNC('quarter', current_date) + INTERVAL '3 months' - INTERVAL '1 day')::DATE,
-            DATE_TRUNC('year', current_date)::DATE,
-            (DATE_TRUNC('year', current_date) + INTERVAL '1 year' - INTERVAL '1 day')::DATE
+            EXTRACT(YEAR FROM v_current_date)::INTEGER,  -- fiscal_year = calendar year
+            EXTRACT(QUARTER FROM v_current_date)::INTEGER,
+            EXTRACT(MONTH FROM v_current_date)::INTEGER,
+            DATE_TRUNC('week', v_current_date)::DATE,
+            (DATE_TRUNC('week', v_current_date) + INTERVAL '6 days')::DATE,
+            DATE_TRUNC('month', v_current_date)::DATE,
+            (DATE_TRUNC('month', v_current_date) + INTERVAL '1 month' - INTERVAL '1 day')::DATE,
+            DATE_TRUNC('quarter', v_current_date)::DATE,
+            (DATE_TRUNC('quarter', v_current_date) + INTERVAL '3 months' - INTERVAL '1 day')::DATE,
+            DATE_TRUNC('year', v_current_date)::DATE,
+            (DATE_TRUNC('year', v_current_date) + INTERVAL '1 year' - INTERVAL '1 day')::DATE
         ON CONFLICT (date_key) DO NOTHING;
 
         rows_inserted := rows_inserted + 1;
-        current_date := current_date + INTERVAL '1 day';
+        v_current_date := v_current_date + INTERVAL '1 day';
     END LOOP;
 
     RETURN rows_inserted;
@@ -109,42 +109,41 @@ COMMENT ON FUNCTION dwh.populate_dim_date IS 'Заполнение календ�
 -- Функция для генерации времени
 CREATE OR REPLACE FUNCTION dwh.populate_dim_time() RETURNS INTEGER AS $$
 DECLARE
-    current_time TIME;
-    current_hour INTEGER;
-    current_minute INTEGER;
-    current_second INTEGER;
-    time_period VARCHAR(20);
-    is_rush_hour BOOLEAN;
-    rush_hour_type VARCHAR(20);
+    v_time TIME;
+    v_hour INTEGER;
+    v_minute INTEGER;
+    v_time_period VARCHAR(20);
+    v_is_rush_hour BOOLEAN;
+    v_rush_hour_type VARCHAR(20);
     rows_inserted INTEGER := 0;
 BEGIN
     -- Генерация каждой минуты (можно изменить на каждую секунду если нужно)
-    current_hour := 0;
+    v_hour := 0;
 
-    WHILE current_hour < 24 LOOP
-        current_minute := 0;
+    WHILE v_hour < 24 LOOP
+        v_minute := 0;
 
-        WHILE current_minute < 60 LOOP
-            current_time := MAKE_TIME(current_hour, current_minute, 0);
+        WHILE v_minute < 60 LOOP
+            v_time := MAKE_TIME(v_hour, v_minute, 0);
 
             -- Определение периода дня
-            time_period := CASE
-                WHEN current_hour >= 6 AND current_hour < 12 THEN 'morning'
-                WHEN current_hour >= 12 AND current_hour < 18 THEN 'afternoon'
-                WHEN current_hour >= 18 AND current_hour < 22 THEN 'evening'
+            v_time_period := CASE
+                WHEN v_hour >= 6 AND v_hour < 12 THEN 'morning'
+                WHEN v_hour >= 12 AND v_hour < 18 THEN 'afternoon'
+                WHEN v_hour >= 18 AND v_hour < 22 THEN 'evening'
                 ELSE 'night'
             END;
 
             -- Определение часа пик
-            is_rush_hour := CASE
-                WHEN (current_hour >= 7 AND current_hour < 10) OR
-                     (current_hour >= 17 AND current_hour < 20) THEN TRUE
+            v_is_rush_hour := CASE
+                WHEN (v_hour >= 7 AND v_hour < 10) OR
+                     (v_hour >= 17 AND v_hour < 20) THEN TRUE
                 ELSE FALSE
             END;
 
-            rush_hour_type := CASE
-                WHEN current_hour >= 7 AND current_hour < 10 THEN 'morning_rush'
-                WHEN current_hour >= 17 AND current_hour < 20 THEN 'evening_rush'
+            v_rush_hour_type := CASE
+                WHEN v_hour >= 7 AND v_hour < 10 THEN 'morning_rush'
+                WHEN v_hour >= 17 AND v_hour < 20 THEN 'evening_rush'
                 ELSE NULL
             END;
 
@@ -159,22 +158,22 @@ BEGIN
                 is_rush_hour,
                 rush_hour_type
             ) VALUES (
-                current_hour * 10000 + current_minute * 100,  -- HHMMSS format
-                current_time,
-                current_hour,
-                current_minute,
+                v_hour * 10000 + v_minute * 100,  -- HHMMSS format
+                v_time,
+                v_hour,
+                v_minute,
                 0,
-                current_hour,
-                time_period,
-                is_rush_hour,
-                rush_hour_type
+                v_hour,
+                v_time_period,
+                v_is_rush_hour,
+                v_rush_hour_type
             ) ON CONFLICT (time_key) DO NOTHING;
 
             rows_inserted := rows_inserted + 1;
-            current_minute := current_minute + 1;
+            v_minute := v_minute + 1;
         END LOOP;
 
-        current_hour := current_hour + 1;
+        v_hour := v_hour + 1;
     END LOOP;
 
     RETURN rows_inserted;

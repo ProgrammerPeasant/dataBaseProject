@@ -220,13 +220,28 @@ class DataGenerator:
         print(f"Генерация {num_users} пользователей...")
 
         users = []
+        used_emails = set()
+        used_usernames = set()
+
         for i in range(num_users):
             registration_date = BASE_DATE - timedelta(days=random.randint(1, 1095))
 
+            # Генерируем уникальный email
+            email = fake.email()
+            while email in used_emails:
+                email = fake.email()
+            used_emails.add(email)
+
+            # Генерируем уникальный username
+            username = fake.user_name() + str(random.randint(1, 9999))
+            while username in used_usernames:
+                username = fake.user_name() + str(random.randint(1, 9999))
+            used_usernames.add(username)
+
             user = {
                 'user_id': i + 1,
-                'username': fake.user_name() + str(random.randint(1, 999)),
-                'email': fake.email(),
+                'username': username,
+                'email': email,
                 'phone': fake.phone_number(),
                 'password_hash': fake.sha256(),
                 'first_name': fake.first_name(),
@@ -279,10 +294,17 @@ class DataGenerator:
                 # Получаем станции маршрута
                 route_stops = [rs for rs in self.route_stations if rs['route_id'] == route['route_id']]
                 if len(route_stops) >= 2:
-                    start_stop = random.choice(route_stops)
-                    end_stop = random.choice([s for s in route_stops if s['sequence_number'] > start_stop['sequence_number']])
-                    start_station_id = start_stop['station_id']
-                    end_station_id = end_stop['station_id']
+                    start_stop = random.choice(route_stops[:-1])  # Не последняя станция
+                    # Ищем станции после начальной
+                    possible_end_stops = [s for s in route_stops if s['sequence_number'] > start_stop['sequence_number']]
+                    if possible_end_stops:
+                        end_stop = random.choice(possible_end_stops)
+                        start_station_id = start_stop['station_id']
+                        end_station_id = end_stop['station_id']
+                    else:
+                        # Если нет подходящих станций, берем случайные
+                        start_station_id = route_stops[0]['station_id']
+                        end_station_id = route_stops[-1]['station_id']
                 else:
                     start_station_id = None
                     end_station_id = None

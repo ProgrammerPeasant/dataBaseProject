@@ -1,6 +1,4 @@
--- MetroPulse DWH - CORE LAYER: DIMENSIONS
--- PostgreSQL
--- Описание: Таблицы измерений (Kimball Star Schema)
+DROP SCHEMA IF EXISTS dwh CASCADE;
 
 -- Создание схемы core DWH
 CREATE SCHEMA IF NOT EXISTS dwh;
